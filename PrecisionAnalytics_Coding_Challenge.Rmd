@@ -197,7 +197,7 @@ test = test %>%
 test %>% 
   count(binary_predicted)
 
-test %>% 
+test_results = test %>% 
   rename(mdb = imdb) %>% 
   mutate(binary_predicted = ifelse(binary_predicted == "PASS", 1, 0)) %>% 
   select(mdb, binary_predicted)
@@ -231,6 +231,6 @@ test %>%
 ```
 
 ```{r write predictions to file}
-write.csv(test, 'test_dataset_with_predictions.csv', row.names = F)
+write.csv(test_results, 'test_dataset_with_predictions.csv', row.names = F)
 ```
 
