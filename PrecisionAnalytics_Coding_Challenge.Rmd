@@ -1,0 +1,240 @@
+---
+title: "Precision Analytics Coding Challenge"
+author: "CMadsen"
+date: "25/05/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F)
+library(tidyverse)
+library(readxl)
+library(scales)
+library(plotly)
+library(caret)
+library(pROC)
+theme_set(theme_classic())
+bech = read_excel("bechdel.xlsx", skip = 1)
+
+#Drop the two last columns, as they will not be used in data visualization and model training.
+bech = bech %>% 
+  select(-...11, -...12)
+```
+
+## Precision Analytics Intermediate Code Challenge
+
+### Descriptive Statistics of Bechdel dataset   
+```{r describe}
+#Do we have missing data?
+bech %>% 
+  mutate(across(.cols = -c(imdb,code,binary), ~as.numeric(.x))) %>% 
+  na.omit(.)
+#1,484 rows have no NA or missing values. Drop the others.
+
+bech = bech %>% 
+  mutate(across(.cols = -c(imdb,code,binary), ~as.numeric(.x))) %>% 
+  na.omit(.)
+
+bech %>% 
+  count(binary)
+#820 FAILS, 664 PASSES.
+
+#Summary.
+summary(bech)
+
+#Simple bar plot for pass/fail.
+ggplotly(
+  bech %>% 
+  count(binary) %>%  
+  mutate(bech_percent = n / sum(n)) %>% 
+  ggplot() + 
+  geom_col(aes(x = binary, y = bech_percent, fill = binary)) + 
+  scale_y_continuous(limits = c(0, 1), 
+                     labels = label_percent()) + 
+  labs(y = "Bechdel Test Proportion (%)",
+       x = "Bechdel Test Result",
+       subtitle = "Bechdel Test Results for 1500 IMDB records (1970 - 2013)",
+       title = "Lack of Real Portrayal of Women in Fiction") + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme(legend.position = "none")
+)
+
+#Does Bechdel Test result change over time?
+bech %>% 
+  ggplot(aes(year, fill = binary, group = binary)) +
+  geom_density(position="fill") + 
+  labs(title = "Portayal of Women in Fiction",
+       subtitle = "Some Improvement in 40 Years",
+       x = "Year", 
+       y = 'Proportion Pass/Fail',
+       fill = "Bechdel Test") + 
+  scale_y_continuous(labels = percent_format())
+```
+
+## Variable Distribution Exploration
+
+```{r pressure}
+#Distribution of predictor variables.
+bech %>% 
+  select(-code) %>% 
+  pivot_longer(cols = -c(year,imdb,binary), names_to = "Variables") %>% 
+  ggplot() + 
+  geom_histogram(aes(x = year, group = Variables, fill = Variables), bins = 43) + 
+  facet_wrap(~ Variables) + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) + 
+  labs(title = "Skewed Distributions")
+
+#Predictors 
+bech %>% 
+  select(-code) %>% 
+  pivot_longer(cols = -c(year,imdb,binary), names_to = "Variables") %>% 
+  mutate(value = log(value)) %>% 
+  ggplot() + 
+  geom_boxplot(aes(y = value, x = binary, group = binary, fill = binary)) + 
+  facet_wrap( ~ Variables, scales = "free") + 
+  labs(y = "US Dollars (logged)",
+       x = "Bechdel Test Result",
+       title = "More Money, Less Representation?",
+       subtitle = "Possible Correlation with Bechdel Test Failure and Money") + 
+  theme(legend.position = "none") + 
+  scale_y_continuous(labels = dollar_format())
+``` 
+
+## Model Variable Selection and Model Testing
+
+### GLM
+
+```{r glm with caret}
+#require(caret)
+# Splitting the data into train and test
+moddat = bech %>% 
+  select(-imdb, -code) %>% 
+  mutate(binary = ifelse(binary == "PASS", 1, 0))
+
+# Training the model
+logmodel <- glm(binary ~ ., family = binomial, moddat)
+
+# Check out the model summary
+summary(logmodel)
+broom::tidy(logmodel)
+
+moddat$predicted_glm <- ifelse(logmodel$fitted.values >= 0.5, "PASS", "FAIL")
+
+#How accurate is our model? 
+results_tab = table(moddat$binary, moddat$predicted_glm)
+acc = sum(diag(results_tab))/sum(results_tab)*100
+print(paste0("Accuracy: ",round(acc,2),"%"))
+
+roc <- roc(moddat$binary, logmodel$fitted.values)
+print(paste0("AUC: ",round(auc(roc), 4)))
+```
+
+### GLM just with 2013 variables
+
+```{r glm for 2013}
+# Training the model
+logmodel_2013 <- glm(binary ~ budget_2013 + domgross_2013 + intgross_2013, family = binomial, moddat)
+
+# Check out the model summary
+summary(logmodel_2013)
+broom::tidy(logmodel_2013)
+
+moddat$predicted_glm_2013 <- ifelse(logmodel_2013$fitted.values >= 0.5, "PASS", "FAIL")
+
+#How accurate is our model? 
+results_tab = table(moddat$binary, moddat$predicted_glm_2013)
+acc = sum(diag(results_tab))/sum(results_tab)*100
+print(paste0("Accuracy: ",round(acc,2),"%"))
+
+roc <- roc(moddat$binary, logmodel_2013$fitted.values)
+print(paste0("AUC: ",round(auc(roc), 4)))
+```
+
+### GLM with stepAIC
+
+```{r glm with stepAIC}
+logmodel_aic = MASS::stepAIC(logmodel)
+#What if we used a stepAIC'd model?
+moddat$predicted_glm_aic <- ifelse(logmodel_aic$fitted.values >= 0.5, "PASS", "FAIL")
+
+#How accurate is our model? 
+results_tab = table(moddat$binary, moddat$predicted_glm_aic)
+acc = sum(diag(results_tab))/sum(results_tab)*100
+print(paste0("Accuracy: ",round(acc,2),"%"))
+
+roc <- roc(moddat$binary, logmodel_aic$fitted.values)
+print(paste0("AUC: ",round(auc(roc), 4)))
+```
+
+### Mixed Model
+
+```{r mixed model}
+library(lme4)
+mmodel = lmer(binary ~ budget_2013 + domgross_2013 + intgross_2013 + (1 | year), data = moddat)
+
+summary(mmodel)
+
+moddat$predicted_mmodel =  predict(mmodel, re.form = NA)
+moddat$predicted_mmodel <- ifelse(moddat$predicted_mmodel >= 0.5, "PASS", "FAIL")
+
+#How accurate is our model? 
+results_tab = table(moddat$binary, moddat$predicted_mmodel)
+acc = sum(diag(results_tab))/sum(results_tab)*100
+print(paste0("Accuracy: ",round(acc,2),"%"))
+```
+
+Looks like the step AIC model is the best... Let's use it.
+
+## Predict for Test Dataset!
+
+```{r}
+test = read.csv('Test.csv') %>% 
+  as_tibble(.)
+
+test = test %>% 
+  mutate(across(-c(imdb,code), ~as.numeric(.x))) %>% 
+  filter(!is.na(domgross))
+
+test$binary_predicted = predict(logmodel_aic, test, type = "response")
+
+test = test %>% 
+  mutate(binary_predicted = ifelse(binary_predicted > 0.5, "PASS", "FAIL"))
+
+test %>% 
+  count(binary_predicted)
+```
+
+``` {r test predictions}
+test %>% 
+  count(binary_predicted) %>%  
+  mutate(bech_percent = n / sum(n)) %>% 
+  ggplot() + 
+  geom_col(aes(x = binary_predicted, y = bech_percent, fill = binary_predicted)) + 
+  scale_y_continuous(limits = c(0, 1), 
+                     labels = label_percent()) + 
+  labs(y = "Predicted Bechdel Test Proportion (%)",
+       x = "Bechdel Test Result",
+       subtitle = "Predicted Bechdel Test Results for 1500 IMDB records (1970 - 2013)",
+       title = "Lack of Real Portrayal of Women in Fiction") + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme(legend.position = "none")
+
+#Does Bechdel Test result change over time?
+test %>% 
+  ggplot(aes(year, fill = binary_predicted, group = binary_predicted)) +
+  geom_density(position="fill") + 
+  labs(title = "Predicted Portayal of Women in Fiction",
+       subtitle = "Some Improvement in 40 Years?",
+       x = "Year", 
+       y = 'Predicted Proportion Pass/Fail',
+       fill = "Bechdel Test") + 
+  scale_y_continuous(labels = percent_format())
+```
+
+```{r write predictions to file}
+write.csv(test, 'test_dataset_with_predictions.csv', row.names = F)
+```
+
