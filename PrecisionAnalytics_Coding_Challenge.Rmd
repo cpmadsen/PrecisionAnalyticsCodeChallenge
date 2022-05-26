@@ -41,6 +41,14 @@ bech %>%
   count(binary)
 #820 FAILS, 664 PASSES.
 
+percentages = bech %>% 
+  count(binary) %>% 
+  mutate(binary_perc = n / sum(n)) %>% 
+  mutate(binary_perc = paste0(100*round(binary_perc,4),"%"))
+
+print(paste0(percentages$binary_perc[1], " of the IMDB records failed the Bechdel Test"))
+print(paste0(percentages$binary_perc[2], " of the IMDB records passed the Bechdel Test"))
+
 #Summary.
 summary(bech)
 
@@ -169,23 +177,6 @@ roc <- roc(moddat$binary, logmodel_aic$fitted.values)
 print(paste0("AUC: ",round(auc(roc), 4)))
 ```
 
-### Mixed Model
-
-```{r mixed model}
-library(lme4)
-mmodel = lmer(binary ~ budget_2013 + domgross_2013 + intgross_2013 + (1 | year), data = moddat)
-
-summary(mmodel)
-
-moddat$predicted_mmodel =  predict(mmodel, re.form = NA)
-moddat$predicted_mmodel <- ifelse(moddat$predicted_mmodel >= 0.5, "PASS", "FAIL")
-
-#How accurate is our model? 
-results_tab = table(moddat$binary, moddat$predicted_mmodel)
-acc = sum(diag(results_tab))/sum(results_tab)*100
-print(paste0("Accuracy: ",round(acc,2),"%"))
-```
-
 Looks like the step AIC model is the best... Let's use it.
 
 ## Predict for Test Dataset!
@@ -205,6 +196,11 @@ test = test %>%
 
 test %>% 
   count(binary_predicted)
+
+test %>% 
+  rename(mdb = imdb) %>% 
+  mutate(binary_predicted = ifelse(binary_predicted == "PASS", 1, 0)) %>% 
+  select(mdb, binary_predicted)
 ```
 
 ``` {r test predictions}
